@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-api-collection"
+version = "0.1.0"
+authors = [
+    { name="Jasper Hajonides", email="jasperhajonides@gmail.com" }
+]
+description = "A Python package to call multiple LLM APIs with a single interface."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent"
+]
+
+[project.urls]
+"Source" = "https://github.com/jasperhajonides/llm-api-collection"
+
+[project.dependencies]
+requests = ">=2.0.0"
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-mock"
+]
