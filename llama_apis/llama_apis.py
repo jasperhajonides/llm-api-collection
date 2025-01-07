@@ -89,7 +89,7 @@ class LLaMApis:
         temperature: float = 0.5,
         max_tokens: int = 256,
         as_json: bool = True,
-        json_formatting: str = None
+        json_formatting: str = None,
         **kwargs
     ):
         """
@@ -153,7 +153,7 @@ class LLaMApis:
             json_output = json.loads(output)
 
                     # **Start of Added Lines**
-            if base_params['logprobs'] is not None:
+            if (base_params['logprobs'] == True):
                 json_logprobs = self.extract_logprobs(
                     json_output=json_output,
                     original_text=prompt,
