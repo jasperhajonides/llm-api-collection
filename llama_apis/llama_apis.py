@@ -140,9 +140,7 @@ class LLaMApis:
         # Extract the content from the response
         output = self.response_openai.choices[0].message.content.strip()
 
-        print(base_params)
         if base_params['logprobs'] == True:
-            print('Yes logprobs')
             self.logprobs = [token.logprob for token in self.response_openai.choices[0].logprobs.content]
         # Parse JSON if required
         if as_json:
@@ -153,18 +151,27 @@ class LLaMApis:
             json_output = json.loads(output)
 
                     # **Start of Added Lines**
-            if (base_params['logprobs'] == True):
-                json_logprobs = self.extract_logprobs(
-                    json_output=json_output,
-                    original_text=prompt,
-                    logprobs_data=self.response_openai.choices[0].logprobs
-                )
-                return {
-                    "json_output": json_output,
-                    "logprobs": json_logprobs
-                }
 
-            return json_output
+            # If logprobs is True, extract them
+            if base_params['logprobs'] == True:
+                # The logprobs object typically appears like:
+                # self.response_openai.choices[0].logprobs
+                # containing .tokens, .token_logprobs, .top_logprobs
+                print('Print log probs')
+                # 3) Extract just the tokens for those string values:
+                res = self.extract_logprobs(
+                    json_output=json_output,
+                    token_logprob_objects=self.response_openai.choices[0].logprobs.content
+                )
+
+                # 4) Inspect the result
+                print("\nExtracted Logprobs:\n", json.dumps(res, indent=2))
+                # return {
+                #     "json_output": json_output,
+                #     "logprobs": extracted
+                # }
+            else:
+                return json_output
         else:
             return output
 
@@ -245,105 +252,118 @@ class LLaMApis:
         return perplexity_output_text
     
 
-
-
-
-
-
     def extract_logprobs(
         self,
         json_output: dict,
-        original_text: str,
-        logprobs_data: dict
+        token_logprob_objects: list,  # e.g. llm.response_openai.choices[0].logprobs.content
     ):
         """
-        Extracts log probabilities for tokens that are part of the JSON values.
+        Extracts log probabilities specifically for the tokens corresponding to *values* in the given JSON.
 
-        :param json_output: The JSON object generated from the LLM output.
-        :param original_text: The original text output from the LLM before JSON conversion.
-        :param logprobs_data: The logprobs data from the OpenAI API response.
-        :return: A dictionary mapping JSON values to their respective token logprobs.
+        :param json_output: The final JSON object produced by the model's text output (parsed via json.loads).
+        :param token_logprob_objects: A list of ChatCompletionTokenLogprob objects,
+            e.g. self.response_openai.choices[0].logprobs.content
+
+            Each ChatCompletionTokenLogprob has attributes:
+            - .token     (str)
+            - .bytes     (list[int])
+            - .logprob   (float)
+            - .top_logprobs (list[dict]) or (dict) depending on your library version
+        :return: A dict with the same keys as json_output. For each key (that has a string value),
+                we return a list of token-level info: {"token": str, "logprob": float, "top_logprobs": [...]}
+
+        NOTE: This approach is *naive* because it tries to align tokens by a simple "next tokens consumed"
+        logic. The model’s output can contain quotes, braces, punctuation, etc. Use a robust approach
+        (e.g., exact substring matching or tiktoken alignment) for production.
         """
-        import re
 
-        if not logprobs_data:
-            raise ValueError("No logprobs data provided.")
+        # 1) Flatten out all string values from the JSON into a list of (key, value_string).
+        #    We'll only process keys where the value is a string.
+        kv_pairs = []
+        for key, val in json_output.items():
+            if isinstance(val, str):
+                kv_pairs.append((key, val))
+            elif isinstance(val, dict):
+                # If nested dicts exist, you'd recursively flatten them in a more advanced approach.
+                # For simplicity, we skip them here or do recursion.
+                pass
 
-        # Flatten the JSON values into a single string
-        values = []
-        for key, value in json_output.items():
-            if isinstance(value, str):
-                values.append(value)
-            elif isinstance(value, dict):
-                # Recursively handle nested dictionaries if needed
-                nested_values = self._flatten_json_values(value)
-                values.extend(nested_values)
-            # Add more conditions if your JSON can contain lists or other types
+        # 2) We'll keep an index pointer `idx` that walks through token_logprob_objects
+        idx = 0
+        n_tokens = len(token_logprob_objects)
 
-        combined_values_text = " ".join(values)
+        result = {}
 
-        # Tokenize the combined values text
-        # Note: The tokenization method should match OpenAI's tokenization
-        # For simplicity, we'll use a basic split. For accurate tokenization, consider using OpenAI's tiktoken library.
-        tokens = combined_values_text.split()
+        # 3) For each (key, string_value), we'll match tokens *in order* from token_logprob_objects
+        #    until we've consumed the approximate text for that string. This is naive but illustrative.
+        for key, val_str in kv_pairs:
+            # We'll split the *value* by whitespace as a naive approach
+            # to count how many "words" or lumps we expect.
+            # Then we attempt to assign that many tokens from token_logprob_objects.
+            sub_result = []
+            splitted_value = val_str.strip().split()
+            tokens_needed = len(splitted_value)
 
-        # Extract logprobs from the logprobs_data
-        token_logprobs = logprobs_data.get("token_logprobs", [])
+            # We'll gather tokens_needed tokens from the global list,
+            # skipping any that look like JSON punctuation, quotes, braces, etc.
+            collected = 0
 
-        if len(tokens) != len(token_logprobs):
-            print("Warning: Number of tokens and logprobs do not match.")
-            min_length = min(len(tokens), len(token_logprobs))
-            tokens = tokens[:min_length]
-            token_logprobs = token_logprobs[:min_length]
+            while collected < tokens_needed and idx < n_tokens:
+                t_obj = token_logprob_objects[idx]
+                t_str = t_obj.token.strip()
 
-        # Map tokens to their logprobs
-        token_logprob_mapping = {token: logprob for token, logprob in zip(tokens, token_logprobs)}
+                # Some tokens might be the JSON punctuation or quotes, e.g.  '{', '}', '"'
+                # We do a naive check: if it looks like punctuation or braces, skip it
+                if not t_str or t_str in ['{', '}', ':', ',', '"', '\n', '\n\n']:
+                    idx += 1
+                    continue
 
-        # Optionally, map logprobs back to JSON structure
-        # Here, we'll create a dict where each key maps to a list of (token, logprob)
-        json_logprobs = {}
-        for key, value in json_output.items():
-            if isinstance(value, str):
-                value_tokens = value.split()
-                json_logprobs[key] = [(token, token_logprob_mapping.get(token, None)) for token in value_tokens]
-            elif isinstance(value, dict):
-                # Handle nested dictionaries
-                nested_logprobs = self._extract_nested_logprobs(value, token_logprob_mapping)
-                json_logprobs[key] = nested_logprobs
-            # Add more conditions if your JSON can contain lists or other types
+                # We'll accept this token for the "next piece" of the value.
+                token_info = {
+                    "token": t_str,
+                    "logprob": t_obj.logprob,
+                    "top_logprobs": t_obj.top_logprobs,  # might be a dict or list of dicts
+                }
+                sub_result.append(token_info)
 
-        return json_logprobs
+                collected += 1
+                idx += 1
 
-    def _flatten_json_values(self, nested_dict):
-        """
-        Recursively flattens nested JSON dictionaries to extract string values.
+            result[key] = sub_result
 
-        :param nested_dict: A nested dictionary.
-        :return: A list of string values.
-        """
-        values = []
-        for key, value in nested_dict.items():
-            if isinstance(value, str):
-                values.append(value)
-            elif isinstance(value, dict):
-                values.extend(self._flatten_json_values(value))
-            # Add more conditions if your JSON can contain lists or other types
-        return values
+        return result
 
-    def _extract_nested_logprobs(self, nested_dict, token_logprob_mapping):
-        """
-        Recursively extracts logprobs for nested JSON dictionaries.
 
-        :param nested_dict: A nested dictionary.
-        :param token_logprob_mapping: A dict mapping tokens to logprobs.
-        :return: A nested dictionary mapping keys to lists of (token, logprob).
-        """
-        nested_logprobs = {}
-        for key, value in nested_dict.items():
-            if isinstance(value, str):
-                value_tokens = value.split()
-                nested_logprobs[key] = [(token, token_logprob_mapping.get(token, None)) for token in value_tokens]
-            elif isinstance(value, dict):
-                nested_logprobs[key] = self._extract_nested_logprobs(value, token_logprob_mapping)
-            # Add more conditions if your JSON can contain lists or other types
-        return nested_logprobs
+    # def _flatten_json_values(self, nested_dict):
+    #     """
+    #     Recursively flattens nested JSON dictionaries to extract string values.
+
+    #     :param nested_dict: A nested dictionary.
+    #     :return: A list of string values.
+    #     """
+    #     values = []
+    #     for key, value in nested_dict.items():
+    #         if isinstance(value, str):
+    #             values.append(value)
+    #         elif isinstance(value, dict):
+    #             values.extend(self._flatten_json_values(value))
+    #         # Add more conditions if your JSON can contain lists or other types
+    #     return values
+
+    # def _extract_nested_logprobs(self, nested_dict, token_logprob_mapping):
+    #     """
+    #     Recursively extracts logprobs for nested JSON dictionaries.
+
+    #     :param nested_dict: A nested dictionary.
+    #     :param token_logprob_mapping: A dict mapping tokens to logprobs.
+    #     :return: A nested dictionary mapping keys to lists of (token, logprob).
+    #     """
+    #     nested_logprobs = {}
+    #     for key, value in nested_dict.items():
+    #         if isinstance(value, str):
+    #             value_tokens = value.split()
+    #             nested_logprobs[key] = [(token, token_logprob_mapping.get(token, None)) for token in value_tokens]
+    #         elif isinstance(value, dict):
+    #             nested_logprobs[key] = self._extract_nested_logprobs(value, token_logprob_mapping)
+    #         # Add more conditions if your JSON can contain lists or other types
+    #     return nested_logprobs
