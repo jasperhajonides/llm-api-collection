@@ -89,6 +89,7 @@ class LLaMApis:
         temperature: float = 0.5,
         max_tokens: int = 256,
         as_json: bool = True,
+        logprobs: bool = True,
         json_formatting: str = None,
         **kwargs
     ):
@@ -128,6 +129,7 @@ class LLaMApis:
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "logprobs": logprobs,
             "response_format": response_format,
         }
 
