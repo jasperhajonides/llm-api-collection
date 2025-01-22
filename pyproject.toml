@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "llm-api-collection"
 version = "0.1.0"
 authors = [
-    { name="Jasper Hajonides", email="jasperhajonides@gmail.com" }
+    { name = "Jasper Hajonides", email = "jasperhajonides@gmail.com" }
 ]
 description = "A Python package to call multiple LLM APIs with a single interface."
 readme = "README.md"
@@ -19,10 +19,12 @@ classifiers = [
 ]
 
 [project.urls]
-"Source" = "https://github.com/jasperhajonides/llm-api-collection"
+Source = "https://github.com/jasperhajonides/llm-api-collection"
 
 [project.dependencies]
-requests = ">=2.0.0"
+dependencies = [
+    "requests>=2.0.0"
+]
 
 [project.optional-dependencies]
 test = [
