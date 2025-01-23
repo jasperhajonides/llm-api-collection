@@ -17,14 +17,12 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent"
 ]
-
-[project.urls]
-Source = "https://github.com/jasperhajonides/llm-api-collection"
-
-[project]
 dependencies = [
     "requests>=2.0.0"
 ]
+
+[project.urls]
+Source = "https://github.com/jasperhajonides/llm-api-collection"
 
 [project.optional-dependencies]
 test = [
